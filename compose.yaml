@@ -1,0 +1,96 @@
+name: form-jamaah-umroh
+
+x-app: &app
+  build:
+    context: .
+    target: development
+    args:
+      UID: ${UID:-1000}
+      GID: ${GID:-1000}
+  restart: unless-stopped
+  env_file:
+    - path: .env
+      required: false
+  environment:
+    APP_ENV: local
+    APP_DEBUG: "true"
+    APP_KEY: ${APP_KEY:-base64:1nBp9QWEcyUJZeGGtM4FbMCRrH8yrfsjuXREkh8zE8M=}
+    APP_URL: http://localhost:8000
+    DB_CONNECTION: mysql
+    DB_HOST: mysql
+    DB_PORT: 3306
+    DB_DATABASE: ${DOCKER_DB_DATABASE:-jamaah_umrah}
+    DB_USERNAME: ${DOCKER_DB_USERNAME:-jamaah}
+    DB_PASSWORD: ${DOCKER_DB_PASSWORD:-secret}
+    CACHE_STORE: file
+    SESSION_DRIVER: file
+    QUEUE_CONNECTION: sync
+  volumes:
+    - .:/var/www/html
+    - vendor:/var/www/html/vendor
+  depends_on:
+    mysql:
+      condition: service_healthy
+
+services:
+  app:
+    <<: *app
+    healthcheck:
+      test: ["CMD-SHELL", "php-fpm -t"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  nginx:
+    image: nginx:1.27-alpine
+    restart: unless-stopped
+    ports:
+      - "${APP_PORT:-8000}:80"
+    volumes:
+      - .:/var/www/html:ro
+      - ./docker/nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      app:
+        condition: service_healthy
+
+  vite:
+    image: node:22-bookworm-slim
+    working_dir: /var/www/html
+    restart: unless-stopped
+    ports:
+      - "${VITE_PORT:-5173}:5173"
+    environment:
+      VITE_APP_NAME: ${APP_NAME:-Safar Umrah}
+      WAYFINDER_AUTO_GENERATE: "false"
+    volumes:
+      - .:/var/www/html
+      - vendor:/var/www/html/vendor:ro
+      - node_modules:/var/www/html/node_modules
+    command: sh -c "npm ci && npm run dev -- --host 0.0.0.0"
+    depends_on:
+      app:
+        condition: service_healthy
+
+  mysql:
+    image: mysql:8.4
+    restart: unless-stopped
+    ports:
+      - "${FORWARD_DB_PORT:-3306}:3306"
+    environment:
+      MYSQL_DATABASE: ${DOCKER_DB_DATABASE:-jamaah_umrah}
+      MYSQL_USER: ${DOCKER_DB_USERNAME:-jamaah}
+      MYSQL_PASSWORD: ${DOCKER_DB_PASSWORD:-secret}
+      MYSQL_ROOT_PASSWORD: ${DOCKER_DB_ROOT_PASSWORD:-root}
+    volumes:
+      - mysql_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h localhost -p${DOCKER_DB_ROOT_PASSWORD:-root} --silent"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+
+volumes:
+  mysql_data:
+  vendor:
+  node_modules:
